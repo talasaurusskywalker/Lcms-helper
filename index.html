@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Online LC-MS Stock Helper</title>
+<style>
+:root{--bg:#f5f7fb;--card:#fff;--text:#172033;--muted:#667085;--line:#d9e0ea;--blue:#315efb}
+*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:var(--bg);color:var(--text)}
+.wrap{max-width:980px;margin:28px auto;padding:0 16px 40px}h1{margin-bottom:6px}p{color:var(--muted);line-height:1.45}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;margin:16px 0;box-shadow:0 8px 20px rgba(25,40,72,.05)}
+.row{display:grid;grid-template-columns:1fr auto;gap:10px}input,button{font:inherit}input{width:100%;padding:13px;border:1px solid var(--line);border-radius:10px}
+button{border:0;border-radius:10px;padding:12px 16px;background:var(--blue);color:white;font-weight:700;cursor:pointer}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.box{border:1px solid var(--line);border-radius:12px;padding:13px}
+.label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}.value{font-size:18px;font-weight:700}
+.pill{display:inline-block;padding:6px 10px;border-radius:999px;font-size:13px}.water{background:#eaf7ff;color:#026aa2}.methanol{background:#fff4e5;color:#b54708}.caution{background:#fff1f0;color:#b42318}
+.small{font-size:14px;font-weight:400;line-height:1.45}.hidden{display:none}.status{margin-top:10px;color:var(--muted);font-size:14px}
+.calc{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;font-size:13px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.secondary{background:#eef2ff;color:#2744c7}.ghost{background:#f2f4f7;color:#344054}
+@media(max-width:700px){.row,.grid,.calc{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Online LC-MS Stock Helper</h1>
+<p>Searches the built-in database first, then asks PubChem through a Netlify server function.</p>
+
+<div class="card">
+<form id="searchForm" class="row">
+<input id="q" list="names" autocomplete="off" placeholder="Paste compound name">
+<datalist id="names"></datalist>
+<button type="submit">Search</button>
+</form>
+<div id="status" class="status">Offline database loaded with 63 compounds.</div>
+</div>
+
+<div id="result" class="card hidden">
+<div class="grid">
+<div class="box"><div class="label">Compound</div><div id="name" class="value"></div></div>
+<div class="box"><div class="label">Formula</div><div id="formula" class="value"></div></div>
+<div class="box"><div class="label">Molecular weight</div><div id="mw" class="value"></div></div>
+<div class="box"><div class="label">Starting solvent</div><div id="solvent" class="value"></div></div>
+<div class="box"><div class="label">Starting concentration</div><div id="start" class="value"></div></div>
+<div class="box"><div class="label">Notes</div><div id="notes" class="value small"></div></div>
+</div>
+<div class="actions"><button type="button" class="secondary" onclick="addLog()">Add to log</button></div>
+</div>
+
+<div class="card">
+<h2>Stock calculator</h2>
+<div class="calc">
+<div><div class="label">Mass, mg</div><input id="mass" type="number" step="any"></div>
+<div><div class="label">MW, g/mol</div><input id="cmw" type="number" step="any"></div>
+<div><div class="label">Volume, mL</div><input id="vol" type="number" step="any"></div>
+<div style="display:flex;align-items:end"><button type="button" onclick="calc()" style="width:100%">Calculate</button></div>
+</div>
+<div id="calcOut" class="status">Enter mass, molecular weight, and final volume.</div>
+</div>
+
+<div class="card">
+<h2>Preparation log</h2>
+<div class="actions"><button class="secondary" onclick="exportCSV()">Export CSV</button><button class="ghost" onclick="clearLog()">Clear log</button></div>
+<div style="overflow:auto"><table><thead><tr><th>Compound</th><th>Formula</th><th>MW</th><th>Solvent</th><th>Starting concentration</th><th>Date</th></tr></thead><tbody id="tbody"></tbody></table></div>
+</div>
+
+<div class="card">
+<h2>Add your own compound</h2>
+<div class="grid">
+<input id="aname" placeholder="Compound name">
+<input id="aformula" placeholder="Formula">
+<input id="amw" type="number" step="any" placeholder="Molecular weight">
+<input id="asolvent" placeholder="Solvent">
+<input id="astart" placeholder="Starting concentration">
+<input id="anotes" placeholder="Notes">
+</div>
+<div class="actions"><button onclick="addCustom()">Save offline</button><button class="ghost" onclick="exportDatabase()">Export database backup</button><input id="importFile" type="file" accept=".json" style="max-width:260px"><button class="secondary" onclick="importDatabase()">Import backup</button></div>
+</div>
+
+<p style="font-size:12px">Use supplier documentation and your lab SOP as the final authority. Online solvent suggestions are estimated from PubChem molecular properties.</p>
+</div>
+
+<script>
+const starterDB = [{"name": "L-DOPA", "aliases": ["levodopa", "l dopa", "3,4-dihydroxy-l-phenylalanine"], "formula": "C9H11NO4", "mw": 197.19, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Limited water solubility. Protect from light. Avoid strong alkali because oxidation can increase."}, {"name": "Behenic acid", "aliases": ["docosanoic acid"], "formula": "C22H44O2", "mw": 340.59, "solvent": "Methanol", "category": "methanol", "start": "0.1 to 0.5 mg/mL", "notes": "Very poorly soluble in water. Methanol is the better starting solvent, though dissolution may still be slow."}, {"name": "DL-α-Hydroxybehenic acid", "aliases": ["hydroxybehenic acid", "2-hydroxydocosanoic acid"], "formula": "C22H44O3", "mw": 356.59, "solvent": "Methanol", "category": "methanol", "start": "0.1 to 0.5 mg/mL", "notes": "Long-chain fatty acid. Water is unsuitable. Lower concentration may be needed."}, {"name": "2-Aminoadipic acid", "aliases": ["aminoadipic acid", "alpha-aminoadipic acid"], "formula": "C6H11NO4", "mw": 161.16, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred. Mild pH adjustment may help if permitted by the method."}, {"name": "2-Oxoadipic acid", "aliases": ["alpha-ketoadipic acid", "2-ketoadipic acid"], "formula": "C6H8O5", "mw": 160.12, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred. Mild alkaline adjustment may improve dissolution if allowed."}, {"name": "Pterin", "aliases": [], "formula": "C6H5N5O", "mw": 163.14, "solvent": "Water with mild alkali, if allowed", "category": "caution", "start": "0.1 to 0.5 mg/mL", "notes": "Poorly soluble in neutral water and methanol. Controlled mild alkalinization may be needed."}, {"name": "Biotin", "aliases": ["vitamin b7"], "formula": "C10H16N2O3S", "mw": 244.31, "solvent": "Water", "category": "water", "start": "0.1 to 1 mg/mL", "notes": "Water is preferred. Mild alkali may help if compatible with the method."}, {"name": "Fumaric acid", "aliases": [], "formula": "C4H4O4", "mw": 116.07, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred. Solubility is limited at room temperature."}, {"name": "Cortisol-d4", "aliases": ["hydrocortisone-d4"], "formula": "C21H26D4O5", "mw": 366.49, "solvent": "Methanol", "category": "methanol", "start": "0.1 to 1 mg/mL", "notes": "Steroid standard. Protect from prolonged light exposure."}, {"name": "Testosterone", "aliases": [], "formula": "C19H28O2", "mw": 288.43, "solvent": "Methanol", "category": "methanol", "start": "0.1 to 1 mg/mL", "notes": "Poorly soluble in water. Methanol is preferred."}, {"name": "Glutathione", "aliases": ["reduced glutathione", "gsh"], "formula": "C10H17N3O6S", "mw": 307.32, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Prepare fresh when possible. Minimize air exposure because oxidation can occur."}, {"name": "7-Amino-4-methylcoumarin", "aliases": ["amc", "7-amino-4-methyl-coumarin"], "formula": "C10H9NO2", "mw": 175.19, "solvent": "Methanol", "category": "methanol", "start": "0.1 to 1 mg/mL", "notes": "Methanol is preferred. Protect from strong light."}, {"name": "Cholesterol", "aliases": [], "formula": "C27H46O", "mw": 386.65, "solvent": "Methanol", "category": "methanol", "start": "0.1 to 0.5 mg/mL", "notes": "Very poorly soluble in water. Lower concentration may be needed."}, {"name": "Dopamine", "aliases": [], "formula": "C8H11NO2", "mw": 153.18, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Protect from light and avoid alkaline conditions because oxidation can occur."}, {"name": "Serotonin", "aliases": ["5-hydroxytryptamine", "5-ht"], "formula": "C10H12N2O", "mw": 176.22, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred. Protect from light."}, {"name": "Histamine", "aliases": [], "formula": "C5H9N3", "mw": 111.15, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred."}, {"name": "L-Tyrosine", "aliases": ["tyrosine"], "formula": "C9H11NO3", "mw": 181.19, "solvent": "Water with mild alkali, if allowed", "category": "caution", "start": "0.5 mg/mL", "notes": "Poorly soluble in neutral water. Mild alkali may be required."}, {"name": "L-Tryptophan", "aliases": ["tryptophan"], "formula": "C11H12N2O2", "mw": 204.23, "solvent": "Water", "category": "water", "start": "0.5 to 1 mg/mL", "notes": "Water is preferred, though solubility is limited."}, {"name": "L-Phenylalanine", "aliases": ["phenylalanine"], "formula": "C9H11NO2", "mw": 165.19, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred."}, {"name": "L-Leucine", "aliases": ["leucine"], "formula": "C6H13NO2", "mw": 131.17, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred."}, {"name": "L-Isoleucine", "aliases": ["isoleucine"], "formula": "C6H13NO2", "mw": 131.17, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred."}, {"name": "L-Valine", "aliases": ["valine"], "formula": "C5H11NO2", "mw": 117.15, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred."}, {"name": "L-Alanine", "aliases": ["alanine"], "formula": "C3H7NO2", "mw": 89.09, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred."}, {"name": "Glycine", "aliases": [], "formula": "C2H5NO2", "mw": 75.07, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred."}, {"name": "L-Glutamic acid", "aliases": ["glutamic acid"], "formula": "C5H9NO4", "mw": 147.13, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred. Mild pH adjustment may help."}, {"name": "L-Aspartic acid", "aliases": ["aspartic acid"], "formula": "C4H7NO4", "mw": 133.1, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred. Mild pH adjustment may help."}, {"name": "Citric acid", "aliases": [], "formula": "C6H8O7", "mw": 192.12, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Highly water soluble."}, {"name": "Succinic acid", "aliases": [], "formula": "C4H6O4", "mw": 118.09, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred."}, {"name": "Malic acid", "aliases": [], "formula": "C4H6O5", "mw": 134.09, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred."}, {"name": "Lactic acid", "aliases": ["lactate"], "formula": "C3H6O3", "mw": 90.08, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Miscible or highly soluble in water depending on form."}, {"name": "Pyruvic acid", "aliases": ["pyruvate"], "formula": "C3H4O3", "mw": 88.06, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred. Prepare fresh when possible."}, {"name": "Uric acid", "aliases": [], "formula": "C5H4N4O3", "mw": 168.11, "solvent": "Water with mild alkali, if allowed", "category": "caution", "start": "0.1 to 0.5 mg/mL", "notes": "Poorly soluble in neutral water. Mild alkali may be required."}, {"name": "Creatinine", "aliases": [], "formula": "C4H7N3O", "mw": 113.12, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred."}, {"name": "Creatine", "aliases": [], "formula": "C4H9N3O2", "mw": 131.13, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred."}, {"name": "Caffeine", "aliases": [], "formula": "C8H10N4O2", "mw": 194.19, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred."}, {"name": "Acetaminophen", "aliases": ["paracetamol"], "formula": "C8H9NO2", "mw": 151.16, "solvent": "Methanol", "category": "methanol", "start": "0.5 to 1 mg/mL", "notes": "Methanol is a practical starting solvent. Water solubility is limited."}, {"name": "Ibuprofen", "aliases": [], "formula": "C13H18O2", "mw": 206.28, "solvent": "Methanol", "category": "methanol", "start": "0.1 to 1 mg/mL", "notes": "Poorly soluble in water. Methanol is preferred."}, {"name": "Aspirin", "aliases": ["acetylsalicylic acid"], "formula": "C9H8O4", "mw": 180.16, "solvent": "Methanol", "category": "methanol", "start": "0.5 to 1 mg/mL", "notes": "Methanol is preferred. Avoid prolonged aqueous storage because hydrolysis can occur."}, {"name": "Celecoxib", "aliases": [], "formula": "C17H14F3N3O2S", "mw": 381.37, "solvent": "Methanol", "category": "methanol", "start": "0.1 to 0.5 mg/mL", "notes": "Very poorly soluble in water. Methanol is preferred."}, {"name": "Cortisol", "aliases": ["hydrocortisone"], "formula": "C21H30O5", "mw": 362.46, "solvent": "Methanol", "category": "methanol", "start": "0.1 to 1 mg/mL", "notes": "Steroid standard. Methanol is preferred."}, {"name": "Estradiol", "aliases": ["17-beta-estradiol"], "formula": "C18H24O2", "mw": 272.38, "solvent": "Methanol", "category": "methanol", "start": "0.1 to 0.5 mg/mL", "notes": "Poorly soluble in water. Methanol is preferred."}, {"name": "Progesterone", "aliases": [], "formula": "C21H30O2", "mw": 314.47, "solvent": "Methanol", "category": "methanol", "start": "0.1 to 0.5 mg/mL", "notes": "Poorly soluble in water. Methanol is preferred."}, {"name": "Palmitic acid", "aliases": ["hexadecanoic acid"], "formula": "C16H32O2", "mw": 256.42, "solvent": "Methanol", "category": "methanol", "start": "0.1 to 0.5 mg/mL", "notes": "Water is unsuitable. Methanol is preferred."}, {"name": "Stearic acid", "aliases": ["octadecanoic acid"], "formula": "C18H36O2", "mw": 284.48, "solvent": "Methanol", "category": "methanol", "start": "0.1 to 0.5 mg/mL", "notes": "Water is unsuitable. Methanol is preferred."}, {"name": "Oleic acid", "aliases": ["cis-9-octadecenoic acid"], "formula": "C18H34O2", "mw": 282.47, "solvent": "Methanol", "category": "methanol", "start": "0.1 to 0.5 mg/mL", "notes": "Water is unsuitable. Methanol is preferred."}, {"name": "Linoleic acid", "aliases": [], "formula": "C18H32O2", "mw": 280.45, "solvent": "Methanol", "category": "methanol", "start": "0.1 to 0.5 mg/mL", "notes": "Water is unsuitable. Minimize light and air exposure."}, {"name": "Arachidonic acid", "aliases": [], "formula": "C20H32O2", "mw": 304.47, "solvent": "Methanol", "category": "methanol", "start": "0.1 to 0.5 mg/mL", "notes": "Water is unsuitable. Protect from oxidation."}, {"name": "Glucose", "aliases": ["d-glucose"], "formula": "C6H12O6", "mw": 180.16, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Highly water soluble."}, {"name": "Fructose", "aliases": ["d-fructose"], "formula": "C6H12O6", "mw": 180.16, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Highly water soluble."}, {"name": "Sucrose", "aliases": [], "formula": "C12H22O11", "mw": 342.3, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Highly water soluble."}, {"name": "Riboflavin", "aliases": ["vitamin b2"], "formula": "C17H20N4O6", "mw": 376.36, "solvent": "Water", "category": "water", "start": "0.1 to 0.5 mg/mL", "notes": "Limited water solubility. Protect from light."}, {"name": "Nicotinamide", "aliases": ["niacinamide", "vitamin b3"], "formula": "C6H6N2O", "mw": 122.13, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred."}, {"name": "Thiamine", "aliases": ["vitamin b1"], "formula": "C12H17N4OS", "mw": 265.36, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred. Protect from prolonged light and high pH."}, {"name": "Folic acid", "aliases": ["vitamin b9", "4-aminopteroylglutamic acid"], "formula": "C19H19N7O6", "mw": 441.4, "solvent": "Water with mild alkali, if allowed", "category": "caution", "start": "0.1 to 0.5 mg/mL", "notes": "Poorly soluble in neutral water and methanol. Mild alkali may be needed. Protect from light."}, {"name": "Ascorbic acid", "aliases": ["vitamin c"], "formula": "C6H8O6", "mw": 176.12, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred. Prepare fresh and minimize light and air exposure."}, {"name": "N-Acetylneuraminic acid", "aliases": ["sialic acid"], "formula": "C11H19NO9", "mw": 309.27, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred."}, {"name": "ATP", "aliases": ["adenosine triphosphate"], "formula": "C10H16N5O13P3", "mw": 507.18, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred. Use buffered conditions if required by the method."}, {"name": "ADP", "aliases": ["adenosine diphosphate"], "formula": "C10H15N5O10P2", "mw": 427.2, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred."}, {"name": "AMP", "aliases": ["adenosine monophosphate"], "formula": "C10H14N5O7P", "mw": 347.22, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred."}, {"name": "Adenosine", "aliases": [], "formula": "C10H13N5O4", "mw": 267.24, "solvent": "Water", "category": "water", "start": "0.5 to 1 mg/mL", "notes": "Water is preferred, though solubility is limited."}, {"name": "Uridine", "aliases": [], "formula": "C9H12N2O6", "mw": 244.2, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred."}, {"name": "Cytidine", "aliases": [], "formula": "C9H13N3O5", "mw": 243.22, "solvent": "Water", "category": "water", "start": "1 mg/mL", "notes": "Water is preferred."}, {"name": "Guanosine", "aliases": [], "formula": "C10H13N5O5", "mw": 283.24, "solvent": "Water", "category": "water", "start": "0.5 to 1 mg/mL", "notes": "Water is preferred, though solubility may be limited."}];
+let customDB = JSON.parse(localStorage.getItem("customCompoundDB") || "[]");
+let db = [...starterDB, ...customDB];
+let current = null;
+let log = JSON.parse(localStorage.getItem("prepLogV3") || "[]");
+
+function norm(s){
+ return String(s||"").toLowerCase()
+ .replace(/[®™©]/g,"").replace(/[αΑ]/g,"alpha").replace(/[βΒ]/g,"beta")
+ .replace(/[–—−‐‑]/g,"-")
+ .replace(/\b(monohydrate|dihydrate|trihydrate|hydrate|hydrochloride|hcl|sodium salt|potassium salt)\b/g,"")
+ .replace(/\bcas\s*[:#]?\s*\d{2,7}-\d{2}-\d\b/g,"")
+ .replace(/[^a-z0-9+\- ]/g," ").replace(/\s+/g," ").trim();
+}
+function compact(s){return norm(s).replace(/[^a-z0-9]/g,"")}
+function refresh(){
+ db=[...starterDB,...customDB];
+ document.getElementById("names").innerHTML=db.map(x=>`<option value="${x.name}">`).join("");
+}
+function find(q){
+ const n=norm(q), c=compact(q);
+ let exact=db.find(x=>norm(x.name)===n || (x.aliases||[]).some(a=>norm(a)===n));
+ if(exact) return exact;
+ return db.find(x=>{
+   const vals=[x.name,...(x.aliases||[])].map(compact);
+   return vals.some(v=>v && (c.includes(v)||v.includes(c)));
+ });
+}
+document.getElementById("searchForm").addEventListener("submit",async e=>{
+ e.preventDefault();
+ const q=document.getElementById("q").value.trim();
+ if(!q)return;
+ document.getElementById("status").textContent="Searching...";
+ current=find(q);
+
+ if(!current){
+   try{
+     const response=await fetch("/.netlify/functions/compound?name="+encodeURIComponent(q));
+     const data=await response.json();
+     if(!response.ok)throw new Error(data.error||"Lookup failed");
+     current=data;
+   }catch(err){
+     document.getElementById("result").classList.add("hidden");
+     document.getElementById("status").textContent="Online search failed. "+err.message;
+     return;
+   }
+ }
+
+ document.getElementById("result").classList.remove("hidden");
+ document.getElementById("name").textContent=current.name;
+ document.getElementById("formula").textContent=current.formula||"Not available";
+ document.getElementById("mw").textContent=current.mw+" g/mol";
+ document.getElementById("solvent").innerHTML=`<span class="pill ${current.category||"caution"}">${current.solvent}</span>`;
+ document.getElementById("start").textContent=current.start;
+ document.getElementById("notes").textContent=current.notes;
+ document.getElementById("cmw").value=current.mw;
+ document.getElementById("status").textContent=current.source==="PubChem"?"Found online through PubChem.":"Found in the built-in database.";
+});
+function calc(){
+ const m=+document.getElementById("mass").value,w=+document.getElementById("cmw").value,v=+document.getElementById("vol").value;
+ const out=document.getElementById("calcOut");
+ if(!(m>0&&w>0&&v>0)){out.textContent="Enter valid positive values.";return}
+ const mgml=m/v, mol=(m/1000)/w/(v/1000);
+ out.innerHTML=`<b>${mgml.toFixed(4)} mg/mL</b> | ${(mol*1000).toFixed(4)} mM | ${(mol*1e6).toFixed(1)} µM`;
+}
+function addLog(){
+ if(!current)return;
+ log.push({name:current.name,formula:current.formula,mw:current.mw,solvent:current.solvent,start:current.start,date:new Date().toLocaleDateString()});
+ localStorage.setItem("prepLogV3",JSON.stringify(log));renderLog();
+}
+function renderLog(){
+ document.getElementById("tbody").innerHTML=log.map(x=>`<tr><td>${x.name}</td><td>${x.formula}</td><td>${x.mw}</td><td>${x.solvent}</td><td>${x.start}</td><td>${x.date}</td></tr>`).join("");
+}
+function clearLog(){log=[];localStorage.removeItem("prepLogV3");renderLog()}
+function exportCSV(){
+ if(!log.length)return alert("Log is empty.");
+ const rows=[["Compound","Formula","MW","Solvent","Starting concentration","Date"],...log.map(x=>[x.name,x.formula,x.mw,x.solvent,x.start,x.date])];
+ const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+ downloadBlob(csv,"LCMS_preparation_log.csv","text/csv");
+}
+function addCustom(){
+ const item={
+  name:document.getElementById("aname").value.trim(),
+  aliases:[],
+  formula:document.getElementById("aformula").value.trim(),
+  mw:+document.getElementById("amw").value,
+  solvent:document.getElementById("asolvent").value.trim(),
+  category:"caution",
+  start:document.getElementById("astart").value.trim(),
+  notes:document.getElementById("anotes").value.trim()
+ };
+ if(!item.name||!item.formula||!(item.mw>0)||!item.solvent)return alert("Fill in name, formula, molecular weight, and solvent.");
+ customDB.push(item);localStorage.setItem("customCompoundDB",JSON.stringify(customDB));refresh();
+ alert("Saved offline.");
+}
+function exportDatabase(){downloadBlob(JSON.stringify(customDB,null,2),"LCMS_custom_database.json","application/json")}
+function importDatabase(){
+ const f=document.getElementById("importFile").files[0];if(!f)return alert("Choose a JSON file.");
+ const r=new FileReader();r.onload=()=>{try{customDB=JSON.parse(r.result);localStorage.setItem("customCompoundDB",JSON.stringify(customDB));refresh();alert("Imported.");}catch(e){alert("Invalid JSON file.");}};r.readAsText(f);
+}
+function downloadBlob(data,name,type){
+ const b=new Blob([data],{type}),u=URL.createObjectURL(b),a=document.createElement("a");a.href=u;a.download=name;a.click();URL.revokeObjectURL(u);
+}
+refresh();renderLog();
+</script>
+</body>
+</html>
